@@ -1,13 +1,183 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  EMPLOYEE
+}
+
+enum AssetStatus {
+  AVAILABLE
+  ASSIGNED
+  UNDER_MAINTENANCE
+  RETIRED
+  LOST
+}
+
+enum AssignmentStatus {
+  ACTIVE
+  RETURNED
+}
+
+enum ReturnRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum MaintenanceStatus {
+  OPEN
+  IN_PROGRESS
+  COMPLETED
+}
+
+model User {
+  id           String   @id @default(cuid()) @db.VarChar(30)
+  fullName     String   @db.VarChar(120)
+  email        String   @unique @db.VarChar(191)
+  passwordHash String   @db.VarChar(255)
+  role         UserRole @default(EMPLOYEE)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  assignments        Assignment[]    @relation("EmployeeAssignments")
+  assignmentsCreated Assignment[]    @relation("AssignmentsCreated")
+  returnRequests     ReturnRequest[] @relation("RequestedReturns")
+  requestsReviewed   ReturnRequest[] @relation("ReviewedReturns")
+  auditLogs          AuditLog[]
+
+  @@index([role, isActive])
+  @@index([fullName])
+}
+
+model AssetCategory {
+  id          String   @id @default(cuid()) @db.VarChar(30)
+  name        String   @unique @db.VarChar(100)
+  description String?  @db.VarChar(500)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  assets Asset[]
+
+  @@index([name])
+}
+
+model Asset {
+  id                String      @id @default(cuid()) @db.VarChar(30)
+  assetTag          String      @unique @db.VarChar(50)
+  name              String      @db.VarChar(150)
+  description       String?     @db.Text
+  serialNumber      String?     @unique @db.VarChar(150)
+  manufacturer      String?     @db.VarChar(100)
+  model             String?     @db.VarChar(100)
+  categoryId        String      @db.VarChar(30)
+  status            AssetStatus @default(AVAILABLE)
+  purchaseDate      DateTime?   @db.Date
+  purchaseCost      Decimal?    @db.Decimal(12, 2)
+  warrantyExpiresAt DateTime?   @db.Date
+  location          String?     @db.VarChar(150)
+  notes             String?     @db.Text
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  category    AssetCategory       @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  assignments Assignment[]
+  maintenance MaintenanceRecord[]
+
+  @@index([name])
+  @@index([status, categoryId])
+  @@index([warrantyExpiresAt])
+  @@index([createdAt])
+}
+
+model Assignment {
+  id                    String           @id @default(cuid()) @db.VarChar(30)
+  assetId               String           @db.VarChar(30)
+  employeeId            String           @db.VarChar(30)
+  assignedById          String           @db.VarChar(30)
+  status                AssignmentStatus @default(ACTIVE)
+  assignedAt            DateTime         @default(now())
+  returnedAt            DateTime?
+  conditionAtAssignment String?          @db.VarChar(500)
+  conditionAtReturn     String?          @db.VarChar(500)
+  notes                 String?          @db.Text
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+
+  asset      Asset @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  employee   User  @relation("EmployeeAssignments", fields: [employeeId], references: [id], onDelete: Restrict)
+  assignedBy User  @relation("AssignmentsCreated", fields: [assignedById], references: [id], onDelete: Restrict)
+
+  returnRequests ReturnRequest[]
+
+  @@index([assetId, status])
+  @@index([employeeId, status])
+  @@index([assignedById])
+  @@index([assignedAt])
+}
+
+model ReturnRequest {
+  id            String              @id @default(cuid()) @db.VarChar(30)
+  assignmentId  String              @db.VarChar(30)
+  requestedById String              @db.VarChar(30)
+  reviewedById  String?             @db.VarChar(30)
+  status        ReturnRequestStatus @default(PENDING)
+  reason        String?             @db.VarChar(1000)
+  reviewNote    String?             @db.VarChar(1000)
+  requestedAt   DateTime            @default(now())
+  reviewedAt    DateTime?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  assignment  Assignment @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+  requestedBy User       @relation("RequestedReturns", fields: [requestedById], references: [id], onDelete: Restrict)
+  reviewedBy  User?      @relation("ReviewedReturns", fields: [reviewedById], references: [id], onDelete: Restrict)
+
+  @@index([status, requestedAt])
+  @@index([assignmentId, status])
+  @@index([requestedById])
+}
+
+model MaintenanceRecord {
+  id          String            @id @default(cuid()) @db.VarChar(30)
+  assetId     String            @db.VarChar(30)
+  title       String            @db.VarChar(150)
+  description String?           @db.Text
+  vendor      String?           @db.VarChar(150)
+  status      MaintenanceStatus @default(OPEN)
+  cost        Decimal?          @db.Decimal(12, 2)
+  startedAt   DateTime          @default(now())
+  completedAt DateTime?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Restrict)
+
+  @@index([assetId, status])
+  @@index([startedAt])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid()) @db.VarChar(30)
+  actorId    String?  @db.VarChar(30)
+  action     String   @db.VarChar(100)
+  entityType String   @db.VarChar(100)
+  entityId   String?  @db.VarChar(30)
+  details    String?  @db.Text
+  ipAddress  String?  @db.VarChar(45)
+  createdAt  DateTime @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([actorId, createdAt])
+  @@index([entityType, entityId])
+  @@index([createdAt])
 }
